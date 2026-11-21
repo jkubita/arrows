@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arrows – hra</title>
+<meta name="theme-color" content="#2b2d33">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* VOICE: klidná, hravá logická hra – málo barev, hodně vzduchu
+   IDEA: rýsovací papír s tečkovanou mřížkou, šipky jako tahy tuší
+   PICTURE: herní deska je obraz – velká, nahoře pod skromným titulkem
+   COLOUR and TYPE: teplý papír + tuš, jediný akcent rajčatově červený; Rubik
+   LAYOUT: titul + stav nahoře, deska uprostřed, ovládání pod ní; vše v jednom sloupci */
+:root{color-scheme:light dark;
+--bg:light-dark(#faf8f3,#2b2d33);--paper:light-dark(#ffffff,#3a3d45);--ink:light-dark(#121317,#ffffff);
+--mute:light-dark(#6f6a5f,#b3b0a8);--dot:light-dark(#dcd6ca,#5d606a);--acc:#e5462f;--hint:light-dark(#1f8a5b,#4fd39a);
+--line:light-dark(#e2dccd,#2c2d32)}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overscroll-behavior:none;background:var(--bg);color:var(--ink);font:16px/1.55 Rubik,system-ui,sans-serif;overflow-x:clip}
+main{max-width:680px;margin:0 auto;padding:clamp(16px,3vw,32px) max(4vw,14px) 40px}
+header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+h1{font-size:clamp(32px,6vw,44px);line-height:1.05;margin:0;font-weight:700;letter-spacing:-.01em}
+h1 span{color:var(--acc)}
+.lvl{color:var(--mute);font-size:15px;margin-top:4px}
+.stat{display:flex;gap:16px;align-items:center;font-size:15px;color:var(--mute)}
+.stat b{color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}
+.hearts{display:flex;gap:4px}
+.hearts svg{width:22px;height:22px;transition:transform .25s,opacity .25s}
+.hearts svg.off{opacity:.18;transform:scale(.8)}
+.board{position:relative;aspect-ratio:1;width:100%;background:var(--paper);border-radius:18px;
+box-shadow:0 1px 0 var(--line),0 18px 40px -24px rgba(0,0,0,.35);overflow:hidden;touch-action:manipulation}
+.board canvas{position:absolute;inset:0;width:100%;height:100%;cursor:pointer}
+.controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;align-items:center}
+button{font:500 16px Rubik,system-ui,sans-serif;min-height:44px;padding:0 18px;border-radius:12px;border:1.5px solid var(--ink);
+background:transparent;color:var(--ink);cursor:pointer}
+button.primary{background:var(--ink);color:var(--paper)}
+button:disabled{opacity:.35;cursor:default}
+button:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.nav{margin-left:auto;display:flex;gap:6px}
+.nav button{padding:0 14px}
+.rules{color:var(--mute);font-size:15px;margin-top:22px;max-width:60ch}
+.rules p{margin:.4em 0}
+.modal{position:absolute;inset:0;display:none;place-items:center;background:color-mix(in srgb,var(--paper) 82%,transparent);
+backdrop-filter:blur(3px)}
+.modal.on{display:grid}
+.card{text-align:center;padding:24px}
+.card h2{font-size:32px;line-height:1.05;margin:0 0 8px}
+.card p{margin:0 0 18px;color:var(--mute)}
+@media(max-width:600px){.nav{margin-left:0}.stat{gap:12px}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div><h1>Arrows<span>.</span></h1><div class="lvl" id="lvl">Úroveň 1</div></div>
+  <div class="stat">
+    <div class="hearts" id="hearts" aria-label="Životy"></div>
+    <div>Zbývá <b id="left">0</b></div>
+    <div>Tahy <b id="moves">0</b></div>
+  </div>
+</header>
+<div class="board" id="board">
+  <canvas id="cv" aria-label="Herní deska"></canvas>
+  <div class="modal" id="modal"><div class="card"><h2 id="mTitle"></h2><p id="mText"></p><button class="primary" id="mBtn"></button></div></div>
+</div>
+<div class="controls">
+  <button id="hint">Nápověda</button>
+  <button id="restart">Znovu</button>
+  <div class="nav"><button id="prev" aria-label="Předchozí úroveň">‹</button><button id="next" aria-label="Další úroveň">›</button></div>
+</div>
+<div class="rules">
+  <p>Klepni na šipku a ta vyjede z desky směrem, kam míří – ale jen když jí v cestě nic nestojí. Narazí-li do jiné šipky, přijdeš o život.</p>
+  <p>Vyčisti celou desku dřív, než ti dojdou tři životy. Každá úroveň má řešení.</p>
+</div>
+</main>
+<script>
+{
+const $=id=>document.getElementById(id);
+const cv=$('cv'),ctx=cv.getContext('2d');
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const HEART='<svg viewBox="0 0 24 24"><path fill="var(--acc)" d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 4.5 6.8 4.5c2.2 0 3.6 1.2 5.2 3 1.6-1.8 3-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3C19.5 16.4 12 21 12 21z"/></svg>';
+const DIRS=[[0,-1],[1,0],[0,1],[-1,0]];
+const store={get(k,d){try{const v=localStorage.getItem(k);return v==null?d:+v}catch(e){return d}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+
+function mulberry(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const CAP=Math.min(screen.width,screen.height,innerWidth)<560?10:14;
+const sizeFor=lv=>Math.min(5+Math.floor((lv-1)/2),CAP);
+
+// --- generování úrovně (řešitelnost ověřená hladovým řešičem) ---
+function dirOf(cells,N){const h=cells[cells.length-1],p=cells[cells.length-2];return [(h%N)-(p%N),Math.floor(h/N)-Math.floor(p/N)]}
+function ray(a,occ,N){const [dx,dy]=a.dir;const h=a.cells[a.cells.length-1];let x=h%N+dx,y=Math.floor(h/N)+dy,d=0;
+  while(x>=0&&y>=0&&x<N&&y<N){const o=occ[y*N+x];if(o!==-1)return{by:o,dist:d};x+=dx;y+=dy;d++}return null}
+function stuckSet(arrows,N){const occ=new Array(N*N).fill(-1);arrows.forEach((a,i)=>a.cells.forEach(c=>occ[c]=i));
+  const left=new Set(arrows.map((_,i)=>i));let prog=true;
+  while(prog&&left.size){prog=false;for(const i of left){if(!ray(arrows[i],occ,N)){left.delete(i);arrows[i].cells.forEach(c=>occ[c]=-1);prog=true}}}
+  return left}
+function generate(lv){
+  const N=sizeFor(lv),r=mulberry(lv*7919+13),maxL=N<7?4:N<10?6:8;
+  for(let att=0;att<300;att++){
+    const grid=new Array(N*N).fill(-1),paths=[];
+    const order=[...grid.keys()].sort(()=>r()-.5);
+    for(const c of order){
+      if(grid[c]!==-1)continue;
+      const id=paths.length,p=[c];grid[c]=id;let d=Math.floor(r()*4);const L=2+Math.floor(r()*(maxL-1));
+      while(p.length<L){const last=p[p.length-1],x=last%N,y=Math.floor(last/N);
+        const opts=[];for(let k=0;k<4;k++){const nx=x+DIRS[k][0],ny=y+DIRS[k][1];if(nx>=0&&ny>=0&&nx<N&&ny<N&&grid[ny*N+nx]===-1)opts.push(k)}
+        if(!opts.length)break;
+        if(!(opts.includes(d)&&r()<.55))d=opts[Math.floor(r()*opts.length)];
+        const n=(y+DIRS[d][1])*N+x+DIRS[d][0];grid[n]=id;p.push(n)}
+      if(p.length<2){grid[c]=-2}else paths.push(p)}
+    // osamocená políčka připojit ke konci sousední šipky
+    grid.forEach((g,c)=>{if(g!==-2)return;const x=c%N,y=Math.floor(c/N);
+      for(const[dx,dy]of DIRS){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=N||ny>=N)continue;const n=ny*N+nx,id=grid[n];if(id<0)continue;
+        const p=paths[id];if(p[0]===n){p.unshift(c);grid[c]=id;return}if(p[p.length-1]===n){p.push(c);grid[c]=id;return}}});
+    const holes=grid.filter(g=>g<0).length;
+    if(holes>N*N*.12)continue;
+    const arrows=paths.map(p=>{if(r()<.5)p.reverse();return{cells:p,dir:dirOf(p,N)}});
+    let st=stuckSet(arrows,N);
+    for(let k=0;k<60&&st.size;k++){const s=[...st];const a=arrows[s[Math.floor(r()*s.length)]];a.cells.reverse();a.dir=dirOf(a.cells,N);st=stuckSet(arrows,N)}
+    if(!st.size)return{N,arrows};
+  }
+  return{N:4,arrows:[{cells:[0,1],dir:[1,0]}]};
+}
+
+// --- stav hry ---
+let lv=Math.max(1,store.get('arrows-level',1)),maxLv=Math.max(lv,store.get('arrows-max',1));
+let N,arrows,occ,lives,moves,hintId=-1,hintT=0,over=false;
+function start(){
+  const g=generate(lv);N=g.N;
+  arrows=g.arrows.map(a=>({...a,state:'idle',s:0,t:0,flash:0}));
+  occ=new Array(N*N).fill(-1);arrows.forEach((a,i)=>a.cells.forEach(c=>occ[c]=i));
+  lives=3;moves=0;hintId=-1;over=false;$('modal').classList.remove('on');ui();
+}
+function ui(){
+  $('lvl').textContent=`Úroveň ${lv} · ${N}×${N}`;
+  $('hearts').innerHTML=[0,1,2].map(i=>HEART.replace('<svg',`<svg class="${i<lives?'':'off'}"`)).join('');
+  $('left').textContent=arrows.filter(a=>a.state!=='gone'&&a.state!=='leaving').length;
+  $('moves').textContent=moves;$('prev').disabled=lv<=1;$('next').disabled=lv>=maxLv;
+}
+function modal(t,x,b,fn){$('mTitle').textContent=t;$('mText').textContent=x;$('mBtn').textContent=b;$('mBtn').onclick=fn;$('modal').classList.add('on');setTimeout(()=>$('mBtn').focus(),50)}
+function tap(cell){
+  if(over)return;const id=occ[cell];if(id<0)return;const a=arrows[id];if(a.state!=='idle')return;
+  if(hintId===id)hintId=-1;
+  const hit=ray(a,occ,N);moves++;
+  if(!hit){a.state='leaving';a.s=0;a.cells.forEach(c=>occ[c]=-1);
+    if(arrows.every(b=>b.state==='leaving'||b.state==='gone')){over=true;maxLv=Math.max(maxLv,lv+1);store.set('arrows-max',maxLv);
+      setTimeout(()=>modal('Hotovo!',`Úroveň ${lv} vyčištěna na ${moves} ${moves<5?'tahy':'tahů'}${lives===3?' bez jediné chyby':''}.`,'Další úroveň',()=>go(lv+1)),reduce?150:550)}}
+  else{a.state='bump';a.t=0;a.peak=hit.dist+.3;arrows[hit.by].flash=1;a.flash=1;lives--;
+    if(lives<=0){over=true;setTimeout(()=>modal('Došly životy','Šipky se zasekly. Zkus to znovu – úroveň zůstane stejná.','Hrát znovu',start),650)}}
+  ui();
+}
+function go(n){lv=Math.max(1,Math.min(n,maxLv));store.set('arrows-level',lv);start()}
+
+// --- vykreslování ---
+let W=0,cell=0,off=0,dpr=1,col={};
+function readCol(){const s=getComputedStyle(document.documentElement);for(const k of['ink','dot','acc','hint','paper'])col[k]=s.getPropertyValue('--'+k).trim()}
+function resize(){dpr=devicePixelRatio||1;W=cv.clientWidth;cv.width=W*dpr;cv.height=W*dpr;readCol()}
+const ro=new ResizeObserver(resize);ro.observe(cv);
+const mo=new MutationObserver(()=>setTimeout(readCol,30));mo.observe(document.documentElement,{attributes:true});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>setTimeout(readCol,30));
+function pts(a){const P=a.cells.map(c=>[c%N,Math.floor(c/N)]);const h=P[P.length-1];for(let k=1;k<N+a.cells.length+3;k++)P.push([h[0]+a.dir[0]*k,h[1]+a.dir[1]*k]);return P}
+function at(P,u){const i=Math.min(Math.floor(u),P.length-2),f=u-i;return[P[i][0]+(P[i+1][0]-P[i][0])*f,P[i][1]+(P[i+1][1]-P[i][1])*f]}
+const X=v=>off+(v+.5)*cell;
+function drawArrow(a,color,now){
+  const P=a.P||(a.P=pts(a)),L=a.cells.length,s=a.s,e=s+L-1;
+  const seq=[at(P,s)];for(let i=Math.floor(s)+1;i<e;i++)seq.push(P[i]);seq.push(at(P,e));
+  ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=cell*.2;ctx.lineCap='round';ctx.lineJoin='round';
+  ctx.beginPath();seq.forEach((p,i)=>i?ctx.lineTo(X(p[0]),X(p[1])):ctx.moveTo(X(p[0]),X(p[1])));ctx.stroke();
+  const h=seq[seq.length-1],[dx,dy]=a.dir,hx=X(h[0]),hy=X(h[1]),z=cell*.3;
+  ctx.beginPath();ctx.moveTo(hx+dx*z*1.15,hy+dy*z*1.15);ctx.lineTo(hx-dy*z-dx*z*.35,hy+dx*z-dy*z*.35);ctx.lineTo(hx+dy*z-dx*z*.35,hy-dx*z-dy*z*.35);ctx.closePath();
+  ctx.lineWidth=cell*.08;ctx.fill();ctx.stroke();
+  ctx.beginPath();ctx.arc(X(seq[0][0]),X(seq[0][1]),cell*.13,0,7);ctx.fill();
+}
+function mix(a,b,t){const p=c=>{const m=c.match(/\w\w/g);return m?m.map(x=>parseInt(x,16)):[0,0,0]};const A=p(a),B=p(b);return`rgb(${A.map((v,i)=>Math.round(v+(B[i]-v)*t)).join(',')})`}
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;
+  if(W&&N){
+    cell=W/(N+1);off=cell/2;
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,W);
+    ctx.fillStyle=col.dot;for(let y=0;y<N;y++)for(let x=0;x<N;x++){ctx.beginPath();ctx.arc(X(x),X(y),Math.max(1.5,cell*.05),0,7);ctx.fill()}
+    const speed=reduce?80:N*2.4+10;
+    arrows.forEach((a,i)=>{
+      if(a.state==='gone')return;
+      if(a.state==='leaving'){a.s+=dt*speed*(1+a.s*.08);if(a.s>N+a.cells.length+1){a.state='gone';return}}
+      if(a.state==='bump'){a.t+=dt/(reduce?.2:.45);a.s=a.peak*Math.sin(Math.PI*Math.min(1,a.t));if(a.t>=1){a.s=0;a.state='idle'}}
+      if(a.flash>0)a.flash=Math.max(0,a.flash-dt*1.6);
+      let c=col.ink;
+      if(i===hintId){const k=.5+.5*Math.sin(now/160);c=mix(col.ink,col.hint,.55+.45*k)}
+      if(a.flash>0)c=mix(c,col.acc,Math.min(1,a.flash*1.4));
+      drawArrow(a,c,now);
+    });
+    if(hintId>=0&&now>hintT)hintId=-1;
+  }
+  requestAnimationFrame(frame);
+}
+cv.addEventListener('pointerdown',e=>{
+  const r=cv.getBoundingClientRect(),x=Math.floor((e.clientX-r.left-off)/cell),y=Math.floor((e.clientY-r.top-off)/cell);
+  if(x>=0&&y>=0&&x<N&&y<N)tap(y*N+x);
+});
+$('hint').onclick=()=>{if(over)return;const i=arrows.findIndex(a=>a.state==='idle'&&!ray(a,occ,N));if(i>=0){hintId=i;hintT=performance.now()+2200}};
+$('restart').onclick=start;$('prev').onclick=()=>go(lv-1);$('next').onclick=()=>go(lv+1);
+addEventListener('keydown',e=>{if(e.key==='h')$('hint').click();if(e.key==='r')start()});
+start();resize();requestAnimationFrame(frame);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
